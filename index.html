@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全国校舎対応 フロアマップ＆リアルタイム時間割サイネージ</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Zen Maru Gothic', 'Plus Jakarta Sans', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        /* Active room glowing & pulsing effect for Student Signage */
+        @keyframes pulse-border {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6), 0 10px 25px -5px rgba(99, 102, 241, 0.4);
+                transform: scale(1);
+            }
+            50% {
+                box-shadow: 0 0 0 8px rgba(251, 191, 36, 0.8), 0 20px 30px -5px rgba(99, 102, 241, 0.6);
+                transform: scale(1.02);
+            }
+        }
+
+        .active-room-pulse {
+            animation: pulse-border 2.5s infinite ease-in-out;
+        }
+
+        /* Custom Ticker Marquee */
+        @keyframes marquee {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
+
+        .animate-marquee {
+            display: inline-block;
+            white-space: nowrap;
+            animation: marquee 20s linear infinite;
+        }
+        .animate-marquee:hover {
+            animation-play-state: paused;
+        }
+
+        /* Grid Background Pattern for Staff Map */
+        .bg-grid-pattern {
+            background-size: 20px 20px;
+            background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-slate-800 select-none">
+
+    <!-- Top Global Header -->
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between z-30 shadow-sm flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="bg-gradient-to-tr from-indigo-600 to-purple-600 text-white p-3 rounded-2xl shadow-md">
+                <i class="fa-solid fa-school text-2xl"></i>
+            </div>
+            <div>
+                <h1 class="font-black text-xl text-slate-800 leading-tight">キャンパスフロア案内ナビ</h1>
+                <p class="text-xs text-slate-500 font-bold">105拠点対応 リアルタイムマップ＆時間割システム</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <!-- Campus Selector -->
+            <div class="flex items-center gap-2 bg-slate-100 p-2 rounded-2xl border border-slate-200">
+                <i class="fa-solid fa-location-dot text-indigo-600 text-base ml-2"></i>
+                <select id="campusSelect" onchange="changeCampus()" class="bg-transparent text-base font-bold text-slate-700 outline-none pr-2 cursor-pointer">
+                    <option value="tokyo">東京本校（新宿キャンパス）</option>
+                    <option value="osaka">大阪校（梅田キャンパス）</option>
+                    <option value="fukuoka">福岡校（天神キャンパス）</option>
+                    <option value="nagoya">名古屋校（名駅キャンパス）</option>
+                    <option value="sapporo">札幌校（大通キャンパス）</option>
+                </select>
+            </div>
+
+            <!-- Logged-in Staff Info Badge -->
+            <div id="staffUserInfo" class="hidden items-center gap-2 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-2xl">
+                <img id="staffUserAvatar" src="https://placehold.co/100x100/6366f1/ffffff?text=User" alt="User" class="w-7 h-7 rounded-full border border-indigo-300">
+                <span id="staffUserEmail" class="text-sm font-black text-indigo-900">user@nnn.ac.jp</span>
+                <button onclick="logoutStaff()" class="text-sm font-bold text-slate-400 hover:text-red-600 ml-1" title="ログアウト">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </button>
+            </div>
+
+            <!-- View Switcher Tabs -->
+            <div class="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                <button id="btnStudentView" onclick="switchView('student')" class="px-4 py-2 rounded-xl text-sm font-black transition flex items-center gap-2 bg-indigo-600 text-white shadow-md">
+                    <i class="fa-solid fa-display"></i>
+                    生徒用（サイネージ表示）
+                </button>
+                <button id="btnStaffView" onclick="switchView('staff')" class="px-4 py-2 rounded-xl text-sm font-black transition flex items-center gap-2 text-slate-600 hover:text-slate-900">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    職員用（マップ・時間割編集）
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 overflow-hidden relative">
+
+        <!-- ==================== STUDENT SIGNAGE VIEW ==================== -->
+        <div id="studentView" class="h-full flex flex-col bg-slate-100 p-4 gap-4 overflow-hidden">
+            <!-- Signage Top Bar -->
+            <div class="bg-white rounded-3xl p-5 shadow-sm border border-slate-200/80 flex items-center justify-between flex-shrink-0">
+                <div class="flex items-center gap-5">
+                    <div>
+                        <span id="signageTitle" class="text-base font-black bg-indigo-100 text-indigo-700 px-4 py-1.5 rounded-full uppercase tracking-wider">東京本校 フロア案内</span>
+                        <h2 class="text-4xl font-black text-slate-800 mt-2 flex items-center gap-4">
+                            <span id="currentPeriodDisplay">1限 (09:00〜09:50)</span>
+                            <span class="text-base font-bold px-4 py-2 rounded-full bg-amber-400 text-indigo-950 flex items-center gap-2 shadow-sm">
+                                <i class="fa-solid fa-bolt"></i> リアルタイム授業中
+                            </span>
+                        </h2>
+                    </div>
+
+                    <!-- Floor Switcher Bar for Students -->
+                    <div id="studentFloorTabs" class="flex items-center gap-2 bg-slate-100 p-2 rounded-2xl border border-slate-200 ml-4">
+                        <!-- Dynamic Floor Tabs rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- Clock & Report Countdown Container -->
+                <div class="flex items-center gap-6">
+                    <!-- Report Countdown Card (Shown only during active period) -->
+                    <div id="reportCountdownBox" class="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-6 py-3.5 rounded-2xl shadow-md flex items-center gap-4">
+                        <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl">
+                            <i class="fa-solid fa-calendar-check"></i>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold opacity-90">次回レポート提出期限 <span id="reportDeadlineDate" class="font-black">--/--</span></div>
+                            <div class="text-xl font-black leading-none mt-1">あと <span id="reportDaysLeft" class="text-3xl font-black text-amber-100">--</span> 日</div>
+                        </div>
+                    </div>
+
+                    <!-- Live Clock -->
+                    <div class="text-right border-l-2 border-slate-200 pl-6">
+                        <div id="liveDate" class="text-lg font-bold text-slate-500">2026年11月5日 (木)</div>
+                        <div id="liveClock" class="text-5xl font-black text-indigo-600 tracking-tight">10:18:00</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signage Center Display (Map & Right Schedule List) -->
+            <div class="flex-1 grid grid-cols-12 gap-4 min-h-0">
+                <!-- Map Area (Pop Visual Floor Plan) -->
+                <div class="col-span-8 bg-white rounded-3xl p-5 shadow-sm border border-slate-200 flex flex-col relative overflow-hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-black text-2xl text-slate-700 flex items-center gap-2">
+                            <i class="fa-solid fa-map-location-dot text-indigo-600"></i>
+                            現在のマップ配置 (<span id="currentFloorNameDisplay">1F</span>)
+                        </h3>
+                        <div class="flex items-center gap-4 text-sm font-bold">
+                            <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded-full bg-indigo-600 inline-block"></span>授業中</span>
+                            <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded-full bg-slate-200 inline-block"></span>空き教室</span>
+                            <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded-full bg-amber-100 border border-amber-300 inline-block"></span>共有・設備</span>
+                        </div>
+                    </div>
+
+                    <!-- Visual Canvas View for Students -->
+                    <div class="flex-1 relative border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 overflow-auto p-2" id="signageMapContainer">
+                        <!-- Pop-styled Room blocks injected by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Right Side: Today's Full Schedule List -->
+                <div class="col-span-4 bg-white rounded-3xl p-5 shadow-sm border border-slate-200 flex flex-col min-h-0">
+                    <h3 class="font-black text-2xl text-slate-700 mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-indigo-600"></i>
+                        <span id="periodScheduleTitle">現在の時間割一覧</span>
+                    </h3>
+                    <div id="signageScheduleList" class="flex-1 overflow-y-auto space-y-3 pr-1">
+                        <!-- Period Schedule cards injected by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Ticker Announcement Banner -->
+            <div class="bg-indigo-950 text-white rounded-2xl px-6 py-4 flex items-center gap-4 shadow-md flex-shrink-0 overflow-hidden">
+                <span class="bg-amber-400 text-indigo-950 font-black text-lg px-4 py-2 rounded-xl flex-shrink-0 flex items-center gap-2">
+                    <i class="fa-solid fa-bullhorn"></i> 本日の連絡事項
+                </span>
+                <div class="overflow-hidden relative w-full">
+                    <div id="signageNoticeText" class="animate-marquee font-bold text-2xl text-indigo-100">
+                        【お知らせ】レポート提出に関する個別相談は3階カウンセリングルームにて受付中です。体調管理に気をつけてお過ごしください。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== STAFF EDIT VIEW ==================== -->
+        <div id="staffView" class="h-full flex hidden bg-slate-100">
+            <!-- Sidebar Controls & Config -->
+            <div class="w-96 bg-white border-r border-slate-200 flex flex-col h-full z-10 flex-shrink-0 shadow-sm">
+                <!-- Sidebar Tabs -->
+                <div class="flex border-b border-slate-200 bg-slate-50 p-1">
+                    <button onclick="setStaffTab('map')" id="tabMapBtn" class="flex-1 py-2.5 text-xs font-black rounded-xl bg-white text-indigo-600 shadow-sm">
+                        <i class="fa-solid fa-shapes mr-1"></i>マップ配置
+                    </button>
+                    <button onclick="setStaffTab('time')" id="tabTimeBtn" class="flex-1 py-2.5 text-xs font-black rounded-xl text-slate-500 hover:text-slate-800">
+                        <i class="fa-solid fa-clock mr-1"></i>時間帯設定
+                    </button>
+                </div>
+
+                <!-- Tab 1: Map & Schedule Content Editor -->
+                <div id="staffTabMap" class="flex-1 overflow-y-auto p-4 space-y-4">
+                    <!-- Floor Management Section -->
+                    <div class="bg-indigo-50/60 border border-indigo-100 p-3 rounded-2xl">
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="font-black text-xs text-indigo-950 flex items-center gap-1">
+                                <i class="fa-solid fa-layer-group text-indigo-600"></i>
+                                編集するフロア（階）の選択
+                            </label>
+                            <button onclick="addNewFloor()" class="text-[11px] font-black bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-xl transition flex items-center gap-1">
+                                <i class="fa-solid fa-plus"></i>階を追加
+                            </button>
+                        </div>
+                        <div id="staffFloorTabs" class="flex flex-wrap gap-1.5">
+                            <!-- Floor buttons dynamically injected -->
+                        </div>
+                    </div>
+
+                    <!-- Add Room Preset Buttons -->
+                    <div>
+                        <label class="block font-black text-xs text-slate-500 uppercase tracking-wider mb-2">パーツの追加</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="addRoom('lecture')" class="p-2.5 border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100 rounded-2xl text-left transition group">
+                                <div class="font-black text-xs text-indigo-700 group-hover:translate-x-0.5 transition-transform"><i class="fa-solid fa-door-open mr-1"></i>講義室を追加</div>
+                                <div class="text-[10px] font-bold text-slate-400">授業用ブロック</div>
+                            </button>
+                            <button onclick="addRoom('pc')" class="p-2.5 border border-cyan-200 bg-cyan-50/50 hover:bg-cyan-100 rounded-2xl text-left transition group">
+                                <div class="font-black text-xs text-cyan-700 group-hover:translate-x-0.5 transition-transform"><i class="fa-solid fa-desktop mr-1"></i>PC室を追加</div>
+                                <div class="text-[10px] font-bold text-slate-400">実習用ブロック</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Add Facilities/Shared Area -->
+                    <div>
+                        <label class="block font-black text-xs text-slate-500 uppercase tracking-wider mb-2">共有エリア・設備の追加</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <button onclick="addFacility('toilet', 'トイレ', 'fa-restroom', 'bg-sky-100 text-sky-700 border-sky-300')" class="p-2 border border-slate-200 bg-slate-50 rounded-xl text-center text-xs font-bold hover:bg-slate-100">
+                                <i class="fa-solid fa-restroom text-sky-600 block mb-0.5"></i>トイレ
+                            </button>
+                            <button onclick="addFacility('stairs', '階段', 'fa-stairs', 'bg-amber-100 text-amber-700 border-amber-300')" class="p-2 border border-slate-200 bg-slate-50 rounded-xl text-center text-xs font-bold hover:bg-slate-100">
+                                <i class="fa-solid fa-stairs text-amber-600 block mb-0.5"></i>階段
+                            </button>
+                            <button onclick="addFacility('elevator', 'エレベーター', 'fa-elevator', 'bg-emerald-100 text-emerald-700 border-emerald-300')" class="p-2 border border-slate-200 bg-slate-50 rounded-xl text-center text-xs font-bold hover:bg-slate-100">
+                                <i class="fa-solid fa-elevator text-emerald-600 block mb-0.5"></i>EV
+                            </button>
+                            <button onclick="addFacility('hallway', '廊下', 'fa-arrows-left-right-to-line', 'bg-slate-100 text-slate-600 border-slate-300')" class="p-2 border border-slate-200 bg-slate-50 rounded-xl text-center text-xs font-bold hover:bg-slate-100">
+                                <i class="fa-solid fa-arrows-left-right-to-line text-slate-500 block mb-0.5"></i>廊下
+                            </button>
+                            <button onclick="addFacility('reception', '受付・窓口', 'fa-user-nurse', 'bg-purple-100 text-purple-700 border-purple-300')" class="p-2 border border-slate-200 bg-slate-50 rounded-xl text-center text-xs font-bold hover:bg-slate-100">
+                                <i class="fa-solid fa-user-nurse text-purple-600 block mb-0.5"></i>受付
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Daily Notice Editor (Added Notice Setting) -->
+                    <div class="border-t border-slate-200 pt-3">
+                        <label class="block font-black text-xs text-slate-700 mb-1 flex items-center gap-1">
+                            <i class="fa-solid fa-bullhorn text-amber-500"></i>
+                            「本日の連絡事項」の入力
+                        </label>
+                        <textarea id="editNoticeInput" rows="2" oninput="updateNoticeText(this.value)" class="w-full p-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-bold" placeholder="生徒向けのお知らせを入力..."></textarea>
+                    </div>
+
+                    <!-- Selected Room Details Editor -->
+                    <div id="selectedRoomForm" class="hidden border-t border-slate-200 pt-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="font-black text-xs text-slate-700 flex items-center gap-1">
+                                <i class="fa-solid fa-sliders text-indigo-600"></i>
+                                選択中エリアの設定
+                            </h3>
+                            <button onclick="deleteSelectedRoom()" class="text-xs text-red-500 hover:text-red-700 font-bold">
+                                <i class="fa-solid fa-trash-can mr-1"></i>削除
+                            </button>
+                        </div>
+
+                        <div>
+                            <label class="block font-bold text-[11px] text-slate-500 mb-1">部屋表示名</label>
+                            <input type="text" id="editRoomName" oninput="updateSelectedRoomProp()" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-bold">
+                        </div>
+
+                        <!-- Size Editor (Width & Height Sliders) -->
+                        <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                            <div>
+                                <label class="block font-bold text-[10px] text-slate-500 mb-1">横幅 (W): <span id="valRoomW" class="text-indigo-600 font-extrabold">160</span>px</label>
+                                <input type="range" id="editRoomW" min="60" max="400" step="10" oninput="updateSelectedRoomSize()" class="w-full accent-indigo-600">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-[10px] text-slate-500 mb-1">縦幅 (H): <span id="valRoomH" class="text-indigo-600 font-extrabold">120</span>px</label>
+                                <input type="range" id="editRoomH" min="50" max="300" step="10" oninput="updateSelectedRoomSize()" class="w-full accent-indigo-600">
+                            </div>
+                        </div>
+
+                        <!-- Schedule Editor for Classroom (Only Subject) -->
+                        <div id="scheduleEditorSection" class="space-y-2 pt-2 border-t border-slate-100">
+                            <label class="block font-bold text-[11px] text-slate-500">限目ごとの科目名（授業名）入力</label>
+                            <div id="roomScheduleList" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                <!-- Period inputs generated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Period Time Slots Configuration -->
+                <div id="staffTabTime" class="flex-1 overflow-y-auto p-4 space-y-4 hidden">
+                    <p class="text-xs text-slate-500 font-bold">校舎共通の時間帯（限目）の時間指定を行えます。</p>
+                    <div id="periodTimeConfigList" class="space-y-3">
+                        <!-- Dynamic Period Config rows -->
+                    </div>
+                </div>
+
+                <!-- Footer Save Action -->
+                <div class="p-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+                    <button onclick="saveCampusData()" class="w-full py-3 bg-indigo-600 text-white font-black text-xs rounded-2xl shadow-md hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-floppy-disk"></i>
+                        変更内容を校舎データに保存
+                    </button>
+                </div>
+            </div>
+
+            <!-- Interactive Staff Editor Map Canvas -->
+            <div class="flex-1 p-6 flex flex-col h-full overflow-hidden">
+                <div class="bg-white rounded-3xl border border-slate-200 flex-1 flex flex-col overflow-hidden shadow-sm">
+                    <div class="p-4 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-up-down-left-right text-indigo-600 text-sm"></i>
+                            <span class="font-black text-xs text-slate-700">フロアマップ キャンバス編集（<span id="staffCurrentFloorTitle" class="text-indigo-600 font-extrabold">1F</span>）</span>
+                        </div>
+                        <span class="text-[11px] font-bold text-slate-400">※ドラッグして配置を決定してください</span>
+                    </div>
+
+                    <!-- Canvas Grid Container -->
+                    <div class="flex-1 bg-grid-pattern relative overflow-auto p-4" id="staffCanvas">
+                        <!-- Absolute positioned editable blocks injected by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Simulation Bar (Bottom Debug Bar for Testing Period Switching) -->
+    <div id="simulationBar" class="bg-slate-900 text-white px-6 py-2.5 flex items-center justify-between text-xs z-30 flex-shrink-0">
+        <div class="flex items-center gap-2 font-bold text-slate-300">
+            <i class="fa-solid fa-vial text-amber-400"></i>
+            【動作確認シミュレーター】時間帯（コマ）の切替テスト:
+        </div>
+        <div class="flex items-center gap-2" id="simPeriodButtons">
+            <!-- Simulated buttons injected by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Google Authentication Modal (Added) -->
+    <div id="authModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-100 relative">
+            <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-indigo-100 rounded-3xl flex items-center justify-center mx-auto mb-3 text-indigo-600 text-2xl">
+                    <i class="fa-brands fa-google"></i>
+                </div>
+                <h3 class="text-xl font-black text-slate-800">職員アカウント認証</h3>
+                <p class="text-xs font-bold text-slate-500 mt-1">職員用編集画面へのアクセスには<br><span class="text-indigo-600 font-black">@nnn.ac.jp</span> ドメインのアカウントが必要です</p>
+            </div>
+
+            <!-- Login Form / Sim Input -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-black text-slate-600 mb-1">Google アカウント（メールアドレス）</label>
+                    <div class="relative">
+                        <i class="fa-solid fa-envelope absolute left-3 top-3 text-slate-400 text-xs"></i>
+                        <input type="email" id="loginEmailInput" value="teacher@nnn.ac.jp" placeholder="sample@nnn.ac.jp" class="w-full pl-9 pr-3 py-2.5 text-xs font-bold border border-slate-300 rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <div id="authErrorMsg" class="hidden p-3 bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-2xl flex items-center gap-2">
+                    <i class="fa-solid fa-circle-exclamation text-sm"></i>
+                    <span id="authErrorText">アクセス権限がありません。</span>
+                </div>
+
+                <button onclick="processGoogleLogin()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md transition flex items-center justify-center gap-2">
+                    <i class="fa-brands fa-google"></i>
+                    Googleアカウントでログイン
+                </button>
+            </div>
+            
+            <div class="mt-6 pt-4 border-t border-slate-100 text-center">
+                <span class="text-[10px] font-bold text-slate-400">※デモ体験用に 「teacher@nnn.ac.jp」 が入力されています</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic Script -->
+    <script>
+        // Default Period Slot Times Config
+        let periodTimes = [
+            { id: 1, name: "1限", start: "09:00", end: "09:50" },
+            { id: 2, name: "2限", start: "10:00", end: "10:50" },
+            { id: 3, name: "3限", start: "11:00", end: "11:50" },
+            { id: 4, name: "4限", start: "13:00", end: "13:50" },
+            { id: 5, name: "5限", start: "14:00", end: "14:50" },
+        ];
+
+        // Report Deadline Dates (Every 15th: June to Dec)
+        const reportDeadlines = [
+            { month: 6, day: 15 },
+            { month: 7, day: 15 },
+            { month: 8, day: 15 },
+            { month: 9, day: 15 },
+            { month: 10, day: 15 },
+            { month: 11, day: 15 },
+            { month: 12, day: 15 }
+        ];
+
+        // Global Announcement Text
+        let todayNoticeText = "【お知らせ】レポート提出に関する個別相談は3階カウンセリングルームにて受付中です。体調管理に気をつけてお過ごしください。";
+
+        // Multi-floor Data Structure
+        let activeFloor = '1F';
+        let campusFloors = {
+            '1F': [
+                {
+                    id: 'room_1',
+                    name: '101 講義室',
+                    type: 'lecture',
+                    x: 40,
+                    y: 40,
+                    w: 180,
+                    h: 130,
+                    schedule: {
+                        1: { subject: "国語総合" },
+                        2: { subject: "数学I" },
+                        3: { subject: "英語コミュニケーション" },
+                        4: { subject: "自習時間" },
+                        5: { subject: "現代社会" }
+                    }
+                },
+                {
+                    id: 'room_2',
+                    name: '102 講義室',
+                    type: 'lecture',
+                    x: 240,
+                    y: 40,
+                    w: 180,
+                    h: 130,
+                    schedule: {
+                        1: { subject: "歴史総合" },
+                        2: { subject: "国語総合" },
+                        3: { subject: "物理基礎" },
+                        4: { subject: "化学基礎" },
+                        5: { subject: "空き教室" }
+                    }
+                },
+                {
+                    id: 'room_3',
+                    name: '201 PC実習室',
+                    type: 'pc',
+                    x: 440,
+                    y: 40,
+                    w: 220,
+                    h: 130,
+                    schedule: {
+                        1: { subject: "情報I (プログラミング)" },
+                        2: { subject: "情報I (データサイエンス)" },
+                        3: { subject: "Webデザイン演習" },
+                        4: { subject: "動画編集実践" },
+                        5: { subject: "PC自由利用" }
+                    }
+                },
+                {
+                    id: 'fac_toilet',
+                    name: 'お手洗い',
+                    type: 'facility',
+                    icon: 'fa-restroom',
+                    colorClass: 'bg-sky-100 text-sky-800 border-sky-300',
+                    x: 680,
+                    y: 40,
+                    w: 110,
+                    h: 130
+                },
+                {
+                    id: 'fac_hallway',
+                    name: '中央廊下・フリースペース',
+                    type: 'facility',
+                    icon: 'fa-arrows-left-right-to-line',
+                    colorClass: 'bg-slate-100 text-slate-600 border-slate-300',
+                    x: 40,
+                    y: 190,
+                    w: 750,
+                    h: 60
+                },
+                {
+                    id: 'fac_stairs',
+                    name: '階段',
+                    type: 'facility',
+                    icon: 'fa-stairs',
+                    colorClass: 'bg-amber-100 text-amber-800 border-amber-300',
+                    x: 40,
+                    y: 270,
+                    w: 100,
+                    h: 140
+                },
+                {
+                    id: 'room_4',
+                    name: '301 大ホール',
+                    type: 'hall',
+                    x: 160,
+                    y: 270,
+                    w: 360,
+                    h: 140,
+                    schedule: {
+                        1: { subject: "全校朝会 / 避難訓練" },
+                        2: { subject: "キャリア探究ガイダンス" },
+                        3: { subject: "進路説明会" },
+                        4: { subject: "合同体育・ストレッチ" },
+                        5: { subject: "学年集会" }
+                    }
+                },
+                {
+                    id: 'fac_reception',
+                    name: '総合受付・相談窓口',
+                    type: 'facility',
+                    icon: 'fa-user-nurse',
+                    colorClass: 'bg-purple-100 text-purple-800 border-purple-300',
+                    x: 540,
+                    y: 270,
+                    w: 250,
+                    h: 140
+                }
+            ],
+            '2F': [
+                {
+                    id: 'room_201',
+                    name: '201 講義室',
+                    type: 'lecture',
+                    x: 40,
+                    y: 40,
+                    w: 200,
+                    h: 140,
+                    schedule: {
+                        1: { subject: "英語演習" },
+                        2: { subject: "世界史B" },
+                        3: { subject: "自習時間" },
+                        4: { subject: "数学II" },
+                        5: { subject: "数学B" }
+                    }
+                },
+                {
+                    id: 'room_202',
+                    name: '202 ゼミ室',
+                    type: 'study',
+                    x: 260,
+                    y: 40,
+                    w: 200,
+                    h: 140,
+                    schedule: {
+                        1: { subject: "グループワークゼミ" },
+                        2: { subject: "卒業研究指導" },
+                        3: { subject: "探究学習" },
+                        4: { subject: "個別指導" },
+                        5: { subject: "面談タイム" }
+                    }
+                },
+                {
+                    id: 'fac_toilet_2f',
+                    name: 'お手洗い (2F)',
+                    type: 'facility',
+                    icon: 'fa-restroom',
+                    colorClass: 'bg-sky-100 text-sky-800 border-sky-300',
+                    x: 480,
+                    y: 40,
+                    w: 120,
+                    h: 140
+                }
+            ]
+        };
+
+        // State Tracking
+        let currentView = 'student'; // 'student' or 'staff'
+        let selectedRoomId = null;
+        let simulatedPeriodMode = 'auto'; // 'auto' or period ID (1..5)
+        let currentUser = null; // { email: string }
+
+        // Preset Color Styles
+        const typeStyles = {
+            lecture: { bg: 'bg-indigo-50/90', border: 'border-indigo-300', text: 'text-indigo-900', badge: 'bg-indigo-600 text-white' },
+            pc: { bg: 'bg-cyan-50/90', border: 'border-cyan-300', text: 'text-cyan-900', badge: 'bg-cyan-600 text-white' },
+            study: { bg: 'bg-emerald-50/90', border: 'border-emerald-300', text: 'text-emerald-900', badge: 'bg-emerald-600 text-white' },
+            hall: { bg: 'bg-purple-50/90', border: 'border-purple-300', text: 'text-purple-900', badge: 'bg-purple-600 text-white' }
+        };
+
+        // --- APP INITIALIZATION ---
+        window.onload = function() {
+            startClock();
+            renderFloorTabs();
+            renderPeriodTimeConfig();
+            renderSimButtons();
+            renderStaffCanvas();
+            renderSignageView();
+            document.getElementById('editNoticeInput').value = todayNoticeText;
+        };
+
+        // Floor Management Logic
+        function switchFloor(floor) {
+            activeFloor = floor;
+            selectedRoomId = null;
+            document.getElementById('selectedRoomForm').classList.add('hidden');
+            renderFloorTabs();
+            renderStaffCanvas();
+            renderSignageView();
+        }
+
+        function addNewFloor() {
+            const floorNum = Object.keys(campusFloors).length + 1;
+            const newFloorName = `${floorNum}F`;
+            if (!campusFloors[newFloorName]) {
+                campusFloors[newFloorName] = [];
+                switchFloor(newFloorName);
+            }
+        }
+
+        function renderFloorTabs() {
+            // Render Student Floor Tabs
+            const studentTabs = document.getElementById('studentFloorTabs');
+            if (studentTabs) {
+                studentTabs.innerHTML = '';
+                Object.keys(campusFloors).forEach(floor => {
+                    const btn = document.createElement('button');
+                    const isActive = floor === activeFloor;
+                    btn.className = `px-5 py-2 rounded-xl text-lg font-black transition ${isActive ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`;
+                    btn.innerText = floor;
+                    btn.onclick = () => switchFloor(floor);
+                    studentTabs.appendChild(btn);
+                });
+            }
+
+            // Render Staff Floor Tabs
+            const staffTabs = document.getElementById('staffFloorTabs');
+            if (staffTabs) {
+                staffTabs.innerHTML = '';
+                Object.keys(campusFloors).forEach(floor => {
+                    const btn = document.createElement('button');
+                    const isActive = floor === activeFloor;
+                    btn.className = `px-3.5 py-1 rounded-xl text-xs font-black transition ${isActive ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}`;
+                    btn.innerText = floor;
+                    btn.onclick = () => switchFloor(floor);
+                    staffTabs.appendChild(btn);
+                });
+            }
+
+            const staffTitle = document.getElementById('staffCurrentFloorTitle');
+            if (staffTitle) staffTitle.innerText = activeFloor;
+
+            const signageFloorDisplay = document.getElementById('currentFloorNameDisplay');
+            if (signageFloorDisplay) signageFloorDisplay.innerText = activeFloor;
+        }
+
+        // Live Clock & Report Countdown logic
+        function startClock() {
+            updateClock();
+            setInterval(updateClock, 1000);
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth() + 1;
+            const date = now.getDate();
+            const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+            const day = dayNames[now.getDay()];
+
+            const dateStr = `${year}年${month}月${date}日 (${day})`;
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const timeStr = `${hours}:${minutes}:${seconds}`;
+
+            const dateEl = document.getElementById('liveDate');
+            const clockEl = document.getElementById('liveClock');
+            if (dateEl) dateEl.innerText = dateStr;
+            if (clockEl) clockEl.innerText = timeStr;
+
+            if (simulatedPeriodMode === 'auto') {
+                renderSignageView();
+            }
+        }
+
+        function updateReportCountdown() {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const box = document.getElementById('reportCountdownBox');
+
+            if (!box) return;
+
+            let targetDate = null;
+            for (let deadline of reportDeadlines) {
+                const d = new Date(currentYear, deadline.month - 1, deadline.day, 23, 59, 59);
+                if (now <= d) {
+                    targetDate = d;
+                    break;
+                }
+            }
+
+            // If past Dec 15th, look for next year's June 15th
+            if (!targetDate) {
+                targetDate = new Date(currentYear + 1, reportDeadlines[0].month - 1, reportDeadlines[0].day, 23, 59, 59);
+            }
+
+            const month = now.getMonth() + 1;
+            const date = now.getDate();
+
+            // Hide between Dec 16 and March 31
+            const isOffPeriod = (month === 12 && date >= 16) || (month >= 1 && month <= 3);
+
+            if (isOffPeriod) {
+                box.classList.add('hidden');
+                return;
+            } else {
+                box.classList.remove('hidden');
+            }
+
+            const diffMs = targetDate - now;
+            const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+            const deadlineDateEl = document.getElementById('reportDeadlineDate');
+            const daysLeftEl = document.getElementById('reportDaysLeft');
+
+            if (deadlineDateEl) deadlineDateEl.innerText = `${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
+            if (daysLeftEl) daysLeftEl.innerText = diffDays;
+        }
+
+        // --- AUTHENTICATION LOGIC ---
+        function openAuthModal() {
+            document.getElementById('authModal').classList.remove('hidden');
+            document.getElementById('authErrorMsg').classList.add('hidden');
+        }
+
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.add('hidden');
+        }
+
+        function processGoogleLogin() {
+            const emailInput = document.getElementById('loginEmailInput').value.trim().toLowerCase();
+            const errorMsg = document.getElementById('authErrorMsg');
+            const errorText = document.getElementById('authErrorText');
+
+            if (!emailInput || !emailInput.includes('@')) {
+                errorText.innerText = "有効なメールアドレスを入力してください。";
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            const domain = emailInput.split('@')[1];
+
+            // Domain Restriction Check (nnn.ac.jp strictly required)
+            if (domain !== 'nnn.ac.jp') {
+                errorText.innerText = `アクセス拒否: @${domain} は許可されていません。@nnn.ac.jp の職員アカウントでログインしてください。`;
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            // Successful Login
+            currentUser = { email: emailInput };
+            errorMsg.classList.add('hidden');
+            closeAuthModal();
+
+            // Update UI User Badge
+            const userBadge = document.getElementById('staffUserInfo');
+            document.getElementById('staffUserEmail').innerText = currentUser.email;
+            userBadge.classList.remove('hidden');
+            userBadge.classList.add('flex');
+
+            // Switch to Staff View
+            executeSwitchToStaff();
+        }
+
+        function logoutStaff() {
+            currentUser = null;
+            const userBadge = document.getElementById('staffUserInfo');
+            userBadge.classList.add('hidden');
+            userBadge.classList.remove('flex');
+            switchView('student');
+        }
+
+        // --- VIEW SWITCHING WITH AUTH CHECK ---
+        function switchView(view) {
+            if (view === 'staff') {
+                // Check if user is logged in with @nnn.ac.jp
+                if (!currentUser || !currentUser.email.endsWith('@nnn.ac.jp')) {
+                    openAuthModal();
+                    return;
+                }
+                executeSwitchToStaff();
+            } else {
+                executeSwitchToStudent();
+            }
+        }
+
+        function executeSwitchToStudent() {
+            currentView = 'student';
+            const studentView = document.getElementById('studentView');
+            const staffView = document.getElementById('staffView');
+            const btnStudent = document.getElementById('btnStudentView');
+            const btnStaff = document.getElementById('btnStaffView');
+
+            studentView.classList.remove('hidden');
+            staffView.classList.add('hidden');
+            btnStudent.className = "px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 bg-indigo-600 text-white shadow-md";
+            btnStaff.className = "px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 text-slate-600 hover:text-slate-900";
+            renderSignageView();
+        }
+
+        function executeSwitchToStaff() {
+            currentView = 'staff';
+            const studentView = document.getElementById('studentView');
+            const staffView = document.getElementById('staffView');
+            const btnStudent = document.getElementById('btnStudentView');
+            const btnStaff = document.getElementById('btnStaffView');
+
+            studentView.classList.add('hidden');
+            staffView.classList.remove('hidden');
+            btnStaff.className = "px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 bg-indigo-600 text-white shadow-md";
+            btnStudent.className = "px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 text-slate-600 hover:text-slate-900";
+            renderStaffCanvas();
+        }
+
+        function setStaffTab(tab) {
+            const mapTab = document.getElementById('staffTabMap');
+            const timeTab = document.getElementById('staffTabTime');
+            const mapBtn = document.getElementById('tabMapBtn');
+            const timeBtn = document.getElementById('tabTimeBtn');
+
+            if (tab === 'map') {
+                mapTab.classList.remove('hidden');
+                timeTab.classList.add('hidden');
+                mapBtn.className = "flex-1 py-2 text-xs font-black rounded-xl bg-white text-indigo-600 shadow-sm";
+                timeBtn.className = "flex-1 py-2 text-xs font-black rounded-xl text-slate-500 hover:text-slate-800";
+            } else {
+                mapTab.classList.add('hidden');
+                timeTab.classList.remove('hidden');
+                timeBtn.className = "flex-1 py-2 text-xs font-black rounded-xl bg-white text-indigo-600 shadow-sm";
+                mapBtn.className = "flex-1 py-2 text-xs font-black rounded-xl text-slate-500 hover:text-slate-800";
+            }
+        }
+
+        // --- CAMPUS CHANGING ---
+        function changeCampus() {
+            renderSignageView();
+            renderStaffCanvas();
+        }
+
+        function updateNoticeText(val) {
+            todayNoticeText = val;
+            const signageNotice = document.getElementById('signageNoticeText');
+            if (signageNotice) {
+                signageNotice.innerText = val || "本日の連絡事項はありません。";
+            }
+        }
+
+        // --- STAFF MAP CANVAS RENDER & DRAG / RESIZE ---
+        function renderStaffCanvas() {
+            const canvas = document.getElementById('staffCanvas');
+            if (!canvas) return;
+            canvas.innerHTML = '';
+
+            const currentRooms = campusFloors[activeFloor] || [];
+
+            currentRooms.forEach(room => {
+                const el = document.createElement('div');
+                const isSelected = room.id === selectedRoomId;
+                
+                el.style.left = room.x + 'px';
+                el.style.top = room.y + 'px';
+                el.style.width = room.w + 'px';
+                el.style.height = room.h + 'px';
+                el.style.position = 'absolute';
+
+                if (room.type === 'facility') {
+                    el.className = `rounded-2xl border-2 p-2 flex flex-col items-center justify-center cursor-move select-none transition-shadow ${room.colorClass} ${isSelected ? 'ring-4 ring-indigo-500 shadow-lg z-20' : 'shadow-sm z-10'}`;
+                    el.innerHTML = `
+                        <i class="fa-solid ${room.icon} text-lg mb-1"></i>
+                        <span class="font-extrabold text-xs text-center">${room.name}</span>
+                    `;
+                } else {
+                    const style = typeStyles[room.type] || typeStyles.lecture;
+                    el.className = `rounded-2xl border-2 p-3 flex flex-col justify-between cursor-move select-none transition-shadow ${style.bg} ${style.border} ${style.text} ${isSelected ? 'ring-4 ring-indigo-500 shadow-lg z-20' : 'shadow-sm z-10'}`;
+                    el.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="font-black text-xs truncate mr-1">${room.name}</span>
+                            <span class="w-2 h-2 rounded-full ${style.badge} flex-shrink-0"></span>
+                        </div>
+                        <div class="text-[10px] font-bold opacity-75 truncate">
+                            1限: ${room.schedule[1]?.subject || '未設定'}
+                        </div>
+                    `;
+                }
+
+                // Append Resize Handle if Selected
+                if (isSelected) {
+                    const handle = document.createElement('div');
+                    handle.className = "w-4 h-4 bg-indigo-600 border-2 border-white rounded-full absolute -bottom-1.5 -right-1.5 cursor-se-resize z-30 shadow-md flex items-center justify-center";
+                    handle.innerHTML = `<i class="fa-solid fa-up-right-and-down-left-from-center text-[7px] text-white"></i>`;
+                    handle.addEventListener('mousedown', (e) => startResize(e, room.id));
+                    el.appendChild(handle);
+                }
+
+                // Selection & Drag handling
+                el.addEventListener('mousedown', (e) => {
+                    if (e.target.closest('.cursor-se-resize')) return;
+                    startDrag(e, room.id);
+                });
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectRoom(room.id);
+                });
+
+                canvas.appendChild(el);
+            });
+        }
+
+        let isDragging = false;
+        let isResizing = false;
+        let dragTargetId = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        let startW = 0;
+        let startH = 0;
+        let startMouseX = 0;
+        let startMouseY = 0;
+
+        function startDrag(e, id) {
+            isDragging = true;
+            dragTargetId = id;
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === id);
+            if (!room) return;
+            dragOffsetX = e.clientX - room.x;
+            dragOffsetY = e.clientY - room.y;
+
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', stopDrag);
+        }
+
+        function onDrag(e) {
+            if (!isDragging || !dragTargetId) return;
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === dragTargetId);
+            if (room) {
+                room.x = Math.max(0, e.clientX - dragOffsetX);
+                room.y = Math.max(0, e.clientY - dragOffsetY);
+                renderStaffCanvas();
+            }
+        }
+
+        function stopDrag() {
+            isDragging = false;
+            dragTargetId = null;
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+
+        function startResize(e, id) {
+            e.stopPropagation();
+            isResizing = true;
+            dragTargetId = id;
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === id);
+            if (!room) return;
+            startW = room.w;
+            startH = room.h;
+            startMouseX = e.clientX;
+            startMouseY = e.clientY;
+
+            document.addEventListener('mousemove', onResize);
+            document.addEventListener('mouseup', stopResize);
+        }
+
+        function onResize(e) {
+            if (!isResizing || !dragTargetId) return;
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === dragTargetId);
+            if (room) {
+                const deltaX = e.clientX - startMouseX;
+                const deltaY = e.clientY - startMouseY;
+                room.w = Math.max(60, startW + deltaX);
+                room.h = Math.max(50, startH + deltaY);
+                renderStaffCanvas();
+                
+                // Update slider values if controls are open
+                if (selectedRoomId === room.id) {
+                    document.getElementById('editRoomW').value = room.w;
+                    document.getElementById('editRoomH').value = room.h;
+                    document.getElementById('valRoomW').innerText = Math.round(room.w);
+                    document.getElementById('valRoomH').innerText = Math.round(room.h);
+                }
+            }
+        }
+
+        function stopResize() {
+            isResizing = false;
+            dragTargetId = null;
+            document.removeEventListener('mousemove', onResize);
+            document.removeEventListener('mouseup', stopResize);
+        }
+
+        // --- ROOM CREATION & EDITING ---
+        function addRoom(type) {
+            const newId = 'room_' + Date.now();
+            const names = { lecture: '新講義室', pc: 'PC室', study: '自習エリア', hall: 'ホール' };
+            const newRoom = {
+                id: newId,
+                name: names[type] || '新しい教室',
+                type: type,
+                x: 50,
+                y: 50,
+                w: 160,
+                h: 120,
+                schedule: {
+                    1: { subject: "授業名" },
+                    2: { subject: "授業名" },
+                    3: { subject: "授業名" },
+                    4: { subject: "授業名" },
+                    5: { subject: "授業名" }
+                }
+            };
+            if (!campusFloors[activeFloor]) campusFloors[activeFloor] = [];
+            campusFloors[activeFloor].push(newRoom);
+            selectRoom(newId);
+            renderStaffCanvas();
+        }
+
+        function addFacility(facType, name, icon, colorClass) {
+            const newId = 'facility_' + Date.now();
+            const newFac = {
+                id: newId,
+                name: name,
+                type: 'facility',
+                icon: icon,
+                colorClass: colorClass,
+                x: 60,
+                y: 60,
+                w: 100,
+                h: 80
+            };
+            if (!campusFloors[activeFloor]) campusFloors[activeFloor] = [];
+            campusFloors[activeFloor].push(newFac);
+            selectRoom(newId);
+            renderStaffCanvas();
+        }
+
+        function selectRoom(id) {
+            selectedRoomId = id;
+            renderStaffCanvas();
+            
+            const form = document.getElementById('selectedRoomForm');
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === id);
+
+            if (!room) {
+                form.classList.add('hidden');
+                return;
+            }
+
+            form.classList.remove('hidden');
+            document.getElementById('editRoomName').value = room.name;
+
+            // Set size values
+            document.getElementById('editRoomW').value = room.w;
+            document.getElementById('editRoomH').value = room.h;
+            document.getElementById('valRoomW').innerText = Math.round(room.w);
+            document.getElementById('valRoomH').innerText = Math.round(room.h);
+
+            const scheduleSection = document.getElementById('scheduleEditorSection');
+            const scheduleList = document.getElementById('roomScheduleList');
+            scheduleList.innerHTML = '';
+
+            if (room.type === 'facility') {
+                scheduleSection.classList.add('hidden');
+            } else {
+                scheduleSection.classList.remove('hidden');
+                periodTimes.forEach(p => {
+                    const sch = room.schedule[p.id] || { subject: '' };
+                    const div = document.createElement('div');
+                    div.className = "p-2 bg-slate-50 border border-slate-200 rounded-xl space-y-1";
+                    div.innerHTML = `
+                        <div class="text-[10px] font-black text-indigo-600">${p.name}</div>
+                        <div>
+                            <input type="text" placeholder="科目名（授業名）" value="${sch.subject}" oninput="updateRoomSchedule('${room.id}', ${p.id}, 'subject', this.value)" class="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                    `;
+                    scheduleList.appendChild(div);
+                });
+            }
+        }
+
+        function updateSelectedRoomProp() {
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === selectedRoomId);
+            if (room) {
+                room.name = document.getElementById('editRoomName').value;
+                renderStaffCanvas();
+            }
+        }
+
+        function updateSelectedRoomSize() {
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === selectedRoomId);
+            if (room) {
+                const w = parseFloat(document.getElementById('editRoomW').value);
+                const h = parseFloat(document.getElementById('editRoomH').value);
+                room.w = w;
+                room.h = h;
+                document.getElementById('valRoomW').innerText = Math.round(w);
+                document.getElementById('valRoomH').innerText = Math.round(h);
+                renderStaffCanvas();
+            }
+        }
+
+        function updateRoomSchedule(roomId, periodId, key, val) {
+            const room = (campusFloors[activeFloor] || []).find(r => r.id === roomId);
+            if (room && room.schedule) {
+                if (!room.schedule[periodId]) room.schedule[periodId] = { subject: '' };
+                room.schedule[periodId][key] = val;
+            }
+        }
+
+        function deleteSelectedRoom() {
+            if (!selectedRoomId) return;
+            campusFloors[activeFloor] = (campusFloors[activeFloor] || []).filter(r => r.id !== selectedRoomId);
+            selectedRoomId = null;
+            document.getElementById('selectedRoomForm').classList.add('hidden');
+            renderStaffCanvas();
+        }
+
+        // --- PERIOD TIME CONFIGURATION EDITOR ---
+        function renderPeriodTimeConfig() {
+            const container = document.getElementById('periodTimeConfigList');
+            if (!container) return;
+            container.innerHTML = '';
+
+            periodTimes.forEach(p => {
+                const div = document.createElement('div');
+                div.className = "p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between";
+                div.innerHTML = `
+                    <span class="font-black text-xs text-indigo-700 w-12">${p.name}</span>
+                    <div class="flex items-center gap-1">
+                        <input type="time" value="${p.start}" onchange="updatePeriodTime(${p.id}, 'start', this.value)" class="px-2 py-1 text-xs border border-slate-300 rounded-lg font-bold">
+                        <span class="text-xs text-slate-400 font-bold">〜</span>
+                        <input type="time" value="${p.end}" onchange="updatePeriodTime(${p.id}, 'end', this.value)" class="px-2 py-1 text-xs border border-slate-300 rounded-lg font-bold">
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function updatePeriodTime(id, key, val) {
+            const period = periodTimes.find(p => p.id === id);
+            if (period) {
+                period[key] = val;
+                renderSimButtons();
+                renderSignageView();
+            }
+        }
+
+        // --- SIMULATION & AUTO-PERIOD DETERMINATION ---
+        function renderSimButtons() {
+            const container = document.getElementById('simPeriodButtons');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const autoBtn = document.createElement('button');
+            autoBtn.className = `px-3 py-1 text-xs font-bold rounded-xl border transition ${simulatedPeriodMode === 'auto' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300'}`;
+            autoBtn.innerText = '🕒 時計と連動 (自動)';
+            autoBtn.onclick = () => { simulatedPeriodMode = 'auto'; renderSimButtons(); renderSignageView(); };
+            container.appendChild(autoBtn);
+
+            periodTimes.forEach(p => {
+                const btn = document.createElement('button');
+                btn.className = `px-3 py-1 text-xs font-bold rounded-xl border transition ${simulatedPeriodMode === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300'}`;
+                btn.innerText = p.name;
+                btn.onclick = () => { simulatedPeriodMode = p.id; renderSimButtons(); renderSignageView(); };
+                container.appendChild(btn);
+            });
+        }
+
+        function getActivePeriodId() {
+            if (simulatedPeriodMode !== 'auto') {
+                return simulatedPeriodMode;
+            }
+
+            const now = new Date();
+            const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+            for (let p of periodTimes) {
+                const [sH, sM] = p.start.split(':').map(Number);
+                const [eH, eM] = p.end.split(':').map(Number);
+                const startMin = sH * 60 + sM;
+                const endMin = eH * 60 + eM;
+
+                if (nowMinutes >= startMin && nowMinutes <= endMin) {
+                    return p.id;
+                }
+            }
+            return 1; // Fallback to period 1
+        }
+
+        // --- STUDENT SIGNAGE POP RENDER ---
+        function renderSignageView() {
+            const container = document.getElementById('signageMapContainer');
+            const scheduleList = document.getElementById('signageScheduleList');
+            if (!container || !scheduleList) return;
+
+            container.innerHTML = '';
+            scheduleList.innerHTML = '';
+
+            // Update Announcement Text
+            const signageNotice = document.getElementById('signageNoticeText');
+            if (signageNotice) {
+                signageNotice.innerText = todayNoticeText || "本日の連絡事項はありません。";
+            }
+
+            const activePeriodId = getActivePeriodId();
+            const periodObj = periodTimes.find(p => p.id === activePeriodId) || periodTimes[0];
+
+            // Header campus & period updates
+            const campusSelect = document.getElementById('campusSelect');
+            const campusName = campusSelect.options[campusSelect.selectedIndex].text;
+            document.getElementById('signageTitle').innerText = `${campusName} フロア案内`;
+            document.getElementById('currentPeriodDisplay').innerText = `${periodObj.name} (${periodObj.start}〜${periodObj.end})`;
+            document.getElementById('periodScheduleTitle').innerText = `${periodObj.name}（${periodObj.start}〜${periodObj.end}）の授業一覧`;
+
+            // Calculate Report Countdown
+            updateReportCountdown();
+
+            const currentRooms = campusFloors[activeFloor] || [];
+
+            currentRooms.forEach(room => {
+                const el = document.createElement('div');
+                el.style.left = room.x + 'px';
+                el.style.top = room.y + 'px';
+                el.style.width = room.w + 'px';
+                el.style.height = room.h + 'px';
+                el.style.position = 'absolute';
+
+                if (room.type === 'facility') {
+                    el.className = `rounded-2xl border-2 p-2 flex flex-col items-center justify-center select-none ${room.colorClass} opacity-80 shadow-sm`;
+                    el.innerHTML = `
+                        <i class="fa-solid ${room.icon} text-2xl mb-1"></i>
+                        <span class="font-black text-lg text-center">${room.name}</span>
+                    `;
+                } else {
+                    const sch = room.schedule[activePeriodId];
+                    const hasClass = sch && sch.subject && sch.subject !== '空き教室' && sch.subject !== '自習時間' && sch.subject !== '授業なし';
+                    
+                    if (hasClass) {
+                        el.className = `rounded-2xl border-4 p-3.5 flex flex-col justify-between select-none bg-indigo-600 border-amber-400 text-white shadow-xl active-room-pulse z-20 overflow-hidden`;
+                        el.innerHTML = `
+                            <div>
+                                <div class="flex items-center justify-between">
+                                    <span class="font-black text-lg tracking-wider text-amber-300 truncate mr-1">${room.name}</span>
+                                    <span class="bg-amber-400 text-indigo-950 font-black text-xs px-2.5 py-1 rounded-full flex-shrink-0">授業中</span>
+                                </div>
+                                <div class="font-black text-2xl mt-2 leading-snug truncate">${sch.subject}</div>
+                            </div>
+                        `;
+                    } else {
+                        el.className = `rounded-2xl border-2 p-3.5 flex flex-col justify-between select-none bg-slate-100 border-slate-300 text-slate-500 opacity-70 z-10 overflow-hidden`;
+                        el.innerHTML = `
+                            <div class="flex items-center justify-between">
+                                <span class="font-extrabold text-lg text-slate-700 truncate mr-1">${room.name}</span>
+                                <span class="bg-slate-300 text-slate-700 font-bold text-xs px-2.5 py-1 rounded-full flex-shrink-0">空き</span>
+                            </div>
+                            <div class="text-base font-bold text-slate-400 truncate mt-1">${sch?.subject || '予定なし'}</div>
+                        `;
+                    }
+
+                    // Append to Right Schedule Side List
+                    const listCard = document.createElement('div');
+                    listCard.className = `p-4 rounded-2xl border flex items-center justify-between transition ${hasClass ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200 opacity-60'}`;
+                    listCard.innerHTML = `
+                        <div>
+                            <div class="font-black text-lg text-slate-800">${room.name}</div>
+                            <div class="text-base font-extrabold mt-1 ${hasClass ? 'text-indigo-700' : 'text-slate-400'}">${sch?.subject || '授業なし'}</div>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-sm px-3.5 py-1.5 rounded-full font-black ${hasClass ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}">${hasClass ? '開講中' : '空き'}</span>
+                        </div>
+                    `;
+                    scheduleList.appendChild(listCard);
+                }
+
+                container.appendChild(el);
+            });
+        }
+
+        function saveCampusData() {
+            alert("校舎データを正常に更新・保存しました！生徒用サイネージへ反映されます。");
+        }
+    </script>
+</body>
+</html>
